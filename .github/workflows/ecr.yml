@@ -35,17 +35,18 @@ jobs:
       - name: Register new Task Definition
         id: register-task-def
         run: |
-          TASK_DEF_FILE=$(mktemp)
-          cat > $TASK_DEF_FILE <<EOF
-          {
+          echo '{
             "family": "${{ secrets.SERVICE_NAME }}-family",
             "networkMode": "awsvpc",
             "executionRoleArn": "${{ secrets.TASK_EXECUTION_ROLE_ARN }}",
             "taskRoleArn": "${{ secrets.TASK_ROLE_ARN }}",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "256",
+            "memory": "512",
             "containerDefinitions": [
               {
                 "name": "${{ secrets.CONTAINER_NAME }}",
-                "image": "$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG",
+                "image": "'$ECR_REGISTRY'/${{ secrets.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}",
                 "portMappings": [
                   {
                     "containerPort": ${{ secrets.CONTAINER_PORT }},
@@ -54,35 +55,26 @@ jobs:
                 ],
                 "essential": true
               }
-            ],
-            "requiresCompatibilities": ["FARGATE"],
-            "cpu": "256",
-            "memory": "512"
-          }
-EOF
+            ]
+          }' > taskdef.json
+
           aws ecs register-task-definition \
-            --cli-input-json file://$TASK_DEF_FILE \
+            --cli-input-json file://taskdef.json \
             --region ${{ secrets.AWS_REGION }}
 
-      - name: Update ECS Service
+      - name: Update ECS Service with new Load Balancer and Target Group
         env:
           CLUSTER_NAME: ${{ secrets.CLUSTER_NAME }}
           SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
           CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
           CONTAINER_PORT: ${{ secrets.CONTAINER_PORT }}
           NEW_TG_ARN: ${{ secrets.NEW_TG_ARN }}
+          NEW_ALB_ARN: ${{ secrets.NEW_ALB_ARN }}
         run: |
-          if [ "$NEW_TG_ARN" != "" ]; then
-            echo "Updating service with new target group..."
-            aws ecs update-service \
-              --cluster $CLUSTER_NAME \
-              --service $SERVICE_NAME \
-              --force-new-deployment \
-              --load-balancers "targetGroupArn=$NEW_TG_ARN,containerName=$CONTAINER_NAME,containerPort=$CONTAINER_PORT"
-          else
-            echo "Updating service without changing load balancer..."
-            aws ecs update-service \
-              --cluster $CLUSTER_NAME \
-              --service $SERVICE_NAME \
-              --force-new-deployment
-          fi
+          echo "Updating ECS service with new ALB and TG..."
+          aws ecs update-service \
+            --cluster "$CLUSTER_NAME" \
+            --service "$SERVICE_NAME" \
+            --force-new-deployment \
+            --load-balancers "targetGroupArn=$NEW_TG_ARN,containerName=$CONTAINER_NAME,containerPort=$CONTAINER_PORT" \
+            --region ${{ secrets.AWS_REGION }}
