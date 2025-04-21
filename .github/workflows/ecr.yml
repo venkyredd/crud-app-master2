@@ -5,88 +5,84 @@ on:
     branches:
       - main
 
-env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
-  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
-  IMAGE_TAG: latest
-
 jobs:
-  deploy:
+  build-push-deploy:
     runs-on: ubuntu-latest
 
+    env:
+      ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+      IMAGE_TAG: latest
+
     steps:
-      # 1. Checkout Code
-      - name: Checkout Code
+      - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2. AWS Credentials
-      - name: Configure AWS Credentials
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 3. Login to ECR
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 4. Build & Push Docker Image
-      - name: Build, Tag, and Push Docker Image to ECR
-        env:
-          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+      - name: Build and Push Docker Image
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker build -t $ECR_REGISTRY/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG
 
-      # 5. Register New ECS Task Definition
-      - name: Register ECS Task Definition
-        id: task-def
+      - name: Register new Task Definition
+        id: register-task-def
         run: |
           TASK_DEF_FILE=$(mktemp)
           cat > $TASK_DEF_FILE <<EOF
           {
-            "family": "${{ secrets.TASK_DEF_FAMILY }}",
+            "family": "${{ secrets.SERVICE_NAME }}-family",
             "networkMode": "awsvpc",
-            "requiresCompatibilities": ["FARGATE"],
-            "cpu": "256",
-            "memory": "512",
-            "executionRoleArn": "${{ secrets.TASK_EXEC_ROLE_ARN }}",
+            "executionRoleArn": "${{ secrets.TASK_EXECUTION_ROLE_ARN }}",
             "taskRoleArn": "${{ secrets.TASK_ROLE_ARN }}",
             "containerDefinitions": [
               {
                 "name": "${{ secrets.CONTAINER_NAME }}",
                 "image": "$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG",
-                "essential": true,
                 "portMappings": [
                   {
                     "containerPort": ${{ secrets.CONTAINER_PORT }},
                     "protocol": "tcp"
                   }
-                ]
+                ],
+                "essential": true
               }
-            ]
+            ],
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "256",
+            "memory": "512"
           }
-          EOF
+EOF
+          aws ecs register-task-definition \
+            --cli-input-json file://$TASK_DEF_FILE \
+            --region ${{ secrets.AWS_REGION }}
 
-          aws ecs register-task-definition --cli-input-json file://$TASK_DEF_FILE
-
-      # 6. Update ECS Service
-      - name: Update ECS Service with New Task Definition
+      - name: Update ECS Service
+        env:
+          CLUSTER_NAME: ${{ secrets.CLUSTER_NAME }}
+          SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
+          CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
+          CONTAINER_PORT: ${{ secrets.CONTAINER_PORT }}
+          NEW_TG_ARN: ${{ secrets.NEW_TG_ARN }}
         run: |
-          NEW_TASK_DEF_ARN=$(aws ecs describe-task-definition --task-definition ${{ secrets.TASK_DEF_FAMILY }} --query 'taskDefinition.taskDefinitionArn' --output text)
-          aws ecs update-service \
-            --cluster ${{ secrets.CLUSTER_NAME }} \
-            --service ${{ secrets.SERVICE_NAME }} \
-            --task-definition "$NEW_TASK_DEF_ARN" \
-            --force-new-deployment
-
-      # 7. (Optional) Update ALB Target Group
-      - name: (Optional) Update Load Balancer Target Group
-        if: ${{ secrets.NEW_TG_ARN != '' }}
-        run: |
-          aws ecs update-service \
-            --cluster ${{ secrets.CLUSTER_NAME }} \
-            --service ${{ secrets.SERVICE_NAME }} \
-            --force-new-deployment \
-            --load-balancers "targetGroupArn=${{ secrets.NEW_TG_ARN }},containerName=${{ secrets.CONTAINER_NAME }},containerPort=${{ secrets.CONTAINER_PORT }}"
+          if [ "$NEW_TG_ARN" != "" ]; then
+            echo "Updating service with new target group..."
+            aws ecs update-service \
+              --cluster $CLUSTER_NAME \
+              --service $SERVICE_NAME \
+              --force-new-deployment \
+              --load-balancers "targetGroupArn=$NEW_TG_ARN,containerName=$CONTAINER_NAME,containerPort=$CONTAINER_PORT"
+          else
+            echo "Updating service without changing load balancer..."
+            aws ecs update-service \
+              --cluster $CLUSTER_NAME \
+              --service $SERVICE_NAME \
+              --force-new-deployment
+          fi
