@@ -53,7 +53,15 @@ jobs:
                     "protocol": "tcp"
                   }
                 ],
-                "essential": true
+                "essential": true,
+                "logConfiguration": {
+                  "logDriver": "awslogs",
+                  "options": {
+                    "awslogs-group": "/ecs/${{ secrets.SERVICE_NAME }}",
+                    "awslogs-region": "${{ secrets.AWS_REGION }}",
+                    "awslogs-stream-prefix": "ecs"
+                  }
+                }
               }
             ]
           }' > taskdef.json
@@ -71,10 +79,15 @@ jobs:
           SECURITY_GROUPS: ${{ secrets.SECURITY_GROUPS }}
           CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
           CONTAINER_PORT: ${{ secrets.CONTAINER_PORT }}
-          TG_ARN: arn:aws:elasticloadbalancing:us-east-2:011528270926:targetgroup/v-tg1/1e0c9e7ad875dbe4 # Replace with your actual Target Group ARN
+          TG_ARN: arn:aws:elasticloadbalancing:${{ secrets.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:targetgroup/v-tg1/1e0c9e7ad875dbe4 # Replace with your actual Target Group ARN
         run: |
           echo "Creating new ECS service with Task Definition and Target Group..."
 
+          # Debugging output: Ensure security group and subnet are set correctly
+          echo "SECURITY_GROUPS: $SECURITY_GROUPS"
+          echo "SUBNET_IDS: $SUBNET_IDS"
+
+          # Create ECS service with target group
           aws ecs create-service \
             --cluster "$CLUSTER_NAME" \
             --service-name "$SERVICE_NAME" \
@@ -84,3 +97,12 @@ jobs:
             --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_IDS],securityGroups=[$SECURITY_GROUPS],assignPublicIp=ENABLED}" \
             --load-balancers "targetGroupArn=$TG_ARN,containerName=$CONTAINER_NAME,containerPort=$CONTAINER_PORT" \
             --region ${{ secrets.AWS_REGION }}
+
+      - name: Verify ECS Service Status
+        run: |
+          # Checking ECS service status after deployment
+          aws ecs describe-services \
+            --cluster ${{ secrets.CLUSTER_NAME }} \
+            --services ${{ secrets.SERVICE_NAME }} \
+            --region ${{ secrets.AWS_REGION }} \
+            --query 'services[0].status'
