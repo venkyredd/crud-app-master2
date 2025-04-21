@@ -63,83 +63,51 @@ jobs:
                   }
                 }
               }
-            ]
+            ],
+            "runtimePlatform": {
+              "operatingSystemFamily": "LINUX",
+              "cpuArchitecture": "X86_64"
+            }
           }' > taskdef.json
 
-          aws ecs register-task-definition \
+          TASK_DEF_ARN=$(aws ecs register-task-definition \
             --cli-input-json file://taskdef.json \
-            --region ${{ secrets.AWS_REGION }}
-
-      - name: Check if ECS Service exists
-        id: check-service
-        run: |
-          SERVICE_STATUS=$(aws ecs describe-services \
-            --cluster ${{ secrets.CLUSTER_NAME }} \
-            --services ${{ secrets.SERVICE_NAME }} \
-            --region ${{ secrets.AWS_REGION }} \
-            --query 'services[0].status' \
+            --query 'taskDefinition.taskDefinitionArn' \
             --output text)
 
-          echo "Service status: $SERVICE_STATUS"
-          if [ "$SERVICE_STATUS" == "ACTIVE" ]; then
-            echo "Service already exists, skipping service creation."
-            echo "service_exists=true" >> $GITHUB_ENV
+          echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_ENV
+
+      - name: Deploy or Update ECS Service
+        env:
+          CLUSTER_NAME: ${{ secrets.CLUSTER_NAME }}
+          SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
+          SUBNET_IDS: ${{ secrets.SUBNET_IDS }}
+          SECURITY_GROUPS: ${{ secrets.SECURITY_GROUPS }}
+          CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
+          CONTAINER_PORT: ${{ secrets.CONTAINER_PORT }}
+          TG_ARN: arn:aws:elasticloadbalancing:us-east-2:011528270926:targetgroup/v-tg1/1e0c9e7ad875dbe4
+          TASK_DEF_ARN: ${{ env.TASK_DEF_ARN }}
+        run: |
+          echo "Deploying ECS Service..."
+
+          # Check if service exists
+          SERVICE_EXISTS=$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$SERVICE_NAME" --query "services[0].status" --output text 2>/dev/null || echo "MISSING")
+
+          if [ "$SERVICE_EXISTS" == "ACTIVE" ]; then
+            echo "Service exists, updating..."
+            aws ecs update-service \
+              --cluster "$CLUSTER_NAME" \
+              --service "$SERVICE_NAME" \
+              --task-definition "$TASK_DEF_ARN" \
+              --desired-count 1
           else
-            echo "service_exists=false" >> $GITHUB_ENV
+            echo "Service does not exist, creating..."
+            aws ecs create-service \
+              --cluster "$CLUSTER_NAME" \
+              --service-name "$SERVICE_NAME" \
+              --task-definition "$TASK_DEF_ARN" \
+              --desired-count 1 \
+              --launch-type FARGATE \
+              --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_IDS],securityGroups=[$SECURITY_GROUPS],assignPublicIp=ENABLED}" \
+              --load-balancers "targetGroupArn=$TG_ARN,containerName=$CONTAINER_NAME,containerPort=$CONTAINER_PORT}"
           fi
-
-      - name: Create or Update ECS Service
-        if: env.service_exists == 'false'
-        env:
-          CLUSTER_NAME: ${{ secrets.CLUSTER_NAME }}
-          SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
-          VPC_ID: ${{ secrets.VPC_ID }}
-          SUBNET_IDS: ${{ secrets.SUBNET_IDS }}
-          SECURITY_GROUPS: ${{ secrets.SECURITY_GROUPS }}
-          CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
-          CONTAINER_PORT: ${{ secrets.CONTAINER_PORT }}
-          TG_ARN: arn:aws:elasticloadbalancing:${{ secrets.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:targetgroup/v-tg1/1e0c9e7ad875dbe4 # Replace with your actual Target Group ARN
-        run: |
-          echo "Creating new ECS service with Task Definition and Target Group..."
-
-          aws ecs create-service \
-            --cluster "$CLUSTER_NAME" \
-            --service-name "$SERVICE_NAME" \
-            --task-definition "${SERVICE_NAME}-family" \
-            --desired-count 1 \
-            --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_IDS],securityGroups=[$SECURITY_GROUPS],assignPublicIp=ENABLED}" \
-            --load-balancers "targetGroupArn=$TG_ARN,containerName=$CONTAINER_NAME,containerPort=$CONTAINER_PORT" \
-            --region ${{ secrets.AWS_REGION }}
-
-      - name: Update ECS Service (if service already exists)
-        if: env.service_exists == 'true'
-        env:
-          CLUSTER_NAME: ${{ secrets.CLUSTER_NAME }}
-          SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
-          VPC_ID: ${{ secrets.VPC_ID }}
-          SUBNET_IDS: ${{ secrets.SUBNET_IDS }}
-          SECURITY_GROUPS: ${{ secrets.SECURITY_GROUPS }}
-          CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
-          CONTAINER_PORT: ${{ secrets.CONTAINER_PORT }}
-          TG_ARN: arn:aws:elasticloadbalancing:${{ secrets.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:targetgroup/v-tg1/1e0c9e7ad875dbe4 # Replace with your actual Target Group ARN
-        run: |
-          echo "Updating ECS service with new Task Definition..."
-
-          aws ecs update-service \
-            --cluster "$CLUSTER_NAME" \
-            --service "$SERVICE_NAME" \
-            --task-definition "${SERVICE_NAME}-family" \
-            --desired-count 1 \
-            --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_IDS],securityGroups=[$SECURITY_GROUPS],assignPublicIp=ENABLED}" \
-            --load-balancers "targetGroupArn=$TG_ARN,containerName=$CONTAINER_NAME,containerPort=$CONTAINER_PORT" \
-            --region ${{ secrets.AWS_REGION }}
-
-      - name: Verify ECS Service Status
-        run: |
-          # Checking ECS service status after deployment
-          aws ecs describe-services \
-            --cluster ${{ secrets.CLUSTER_NAME }} \
-            --services ${{ secrets.SERVICE_NAME }} \
-            --region ${{ secrets.AWS_REGION }} \
-            --query 'services[0].status'
