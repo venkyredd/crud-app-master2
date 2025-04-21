@@ -1,33 +1,92 @@
-name: Build and Push to ECR
+name: Build, Push, and Deploy to ECS
 
 on:
   push:
     branches:
       - main
 
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+  IMAGE_TAG: latest
+
 jobs:
-  build-and-push:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      # 1. Checkout Code
+      - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Configure AWS credentials
+      # 2. AWS Credentials
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      # 3. Login to ECR
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, tag, and push Docker image to ECR
+      # 4. Build & Push Docker Image
+      - name: Build, Tag, and Push Docker Image to ECR
         env:
-          ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
-          IMAGE_TAG: latest
         run: |
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      # 5. Register New ECS Task Definition
+      - name: Register ECS Task Definition
+        id: task-def
+        run: |
+          TASK_DEF_FILE=$(mktemp)
+          cat > $TASK_DEF_FILE <<EOF
+          {
+            "family": "${{ secrets.TASK_DEF_FAMILY }}",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "256",
+            "memory": "512",
+            "executionRoleArn": "${{ secrets.TASK_EXEC_ROLE_ARN }}",
+            "taskRoleArn": "${{ secrets.TASK_ROLE_ARN }}",
+            "containerDefinitions": [
+              {
+                "name": "${{ secrets.CONTAINER_NAME }}",
+                "image": "$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG",
+                "essential": true,
+                "portMappings": [
+                  {
+                    "containerPort": ${{ secrets.CONTAINER_PORT }},
+                    "protocol": "tcp"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+
+          aws ecs register-task-definition --cli-input-json file://$TASK_DEF_FILE
+
+      # 6. Update ECS Service
+      - name: Update ECS Service with New Task Definition
+        run: |
+          NEW_TASK_DEF_ARN=$(aws ecs describe-task-definition --task-definition ${{ secrets.TASK_DEF_FAMILY }} --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service \
+            --cluster ${{ secrets.CLUSTER_NAME }} \
+            --service ${{ secrets.SERVICE_NAME }} \
+            --task-definition "$NEW_TASK_DEF_ARN" \
+            --force-new-deployment
+
+      # 7. (Optional) Update ALB Target Group
+      - name: (Optional) Update Load Balancer Target Group
+        if: ${{ secrets.NEW_TG_ARN != '' }}
+        run: |
+          aws ecs update-service \
+            --cluster ${{ secrets.CLUSTER_NAME }} \
+            --service ${{ secrets.SERVICE_NAME }} \
+            --force-new-deployment \
+            --load-balancers "targetGroupArn=${{ secrets.NEW_TG_ARN }},containerName=${{ secrets.CONTAINER_NAME }},containerPort=${{ secrets.CONTAINER_PORT }}"
