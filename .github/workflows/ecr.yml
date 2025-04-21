@@ -62,27 +62,17 @@ jobs:
             --cli-input-json file://taskdef.json \
             --region ${{ secrets.AWS_REGION }}
 
-      - name: Fetch Subnet IDs and Security Groups
-        id: fetch-subnets-sgs
-        run: |
-          # Fetch Subnet IDs and Security Group IDs from the provided VPC
-          SUBNET_IDS=$(aws ec2 describe-subnets --filters Name=vpc-id,Values=${{ secrets.VPC_ID }} --query 'Subnets[*].SubnetId' --output text --region ${{ secrets.AWS_REGION }})
-          SECURITY_GROUPS=$(aws ec2 describe-security-groups --filters Name=vpc-id,Values=${{ secrets.VPC_ID }} --query 'SecurityGroups[*].GroupId' --output text --region ${{ secrets.AWS_REGION }})
-
-          # Set outputs for use in next steps
-          echo "::set-output name=subnet_ids::$SUBNET_IDS"
-          echo "::set-output name=security_groups::$SECURITY_GROUPS"
-
       - name: Create new ECS Service
         env:
           CLUSTER_NAME: ${{ secrets.CLUSTER_NAME }}
           SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
-          TG_ARN: arn:aws:elasticloadbalancing:us-east-2:011528270926:targetgroup/v-tg1/1e0c9e7ad875dbe4 # Provided Target Group ARN
-          NEW_ALB_NAME: ${{ secrets.NEW_ALB_NAME }}  # ALB Name here
-          SUBNET_IDS: ${{ steps.fetch-subnets-sgs.outputs.subnet_ids }}
-          SECURITY_GROUPS: ${{ steps.fetch-subnets-sgs.outputs.security_groups }}
+          VPC_ID: ${{ secrets.VPC_ID }}
+          SUBNET_IDS: ${{ secrets.SUBNET_IDS }}
+          SECURITY_GROUPS: ${{ secrets.SECURITY_GROUPS }}
           CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
           CONTAINER_PORT: ${{ secrets.CONTAINER_PORT }}
+          TG_ARN: arn:aws:elasticloadbalancing:us-east-2:011528270926:targetgroup/v-tg1/1e0c9e7ad875dbe4 # Provided Target Group ARN
+          NEW_ALB_NAME: ${{ secrets.NEW_ALB_NAME }}  # ALB Name here
         run: |
           echo "Creating new ECS service with Task Definition, Target Group, and ALB..."
           
