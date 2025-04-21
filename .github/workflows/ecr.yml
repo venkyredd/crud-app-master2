@@ -77,7 +77,7 @@ jobs:
               --cluster "$CLUSTER_NAME" \
               --service "$SERVICE_NAME" \
               --force-new-deployment \
-              --load-balancers "targetGroupArn=$NEW_TG_ARN,containerName=$CONTAINER_NAME,containerPort=$CONTAINER_PORT,loadBalancerName=$NEW_ALB_NAME" \
+              --load-balancers "targetGroupArn=$NEW_TG_ARN,containerName=$CONTAINER_NAME,containerPort=$CONTAINER_PORT" \
               --region ${{ secrets.AWS_REGION }}
           else
             echo "Error: Target Group ARN and ALB Name are required."
