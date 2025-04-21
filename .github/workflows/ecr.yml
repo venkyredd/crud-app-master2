@@ -62,24 +62,36 @@ jobs:
             --cli-input-json file://taskdef.json \
             --region ${{ secrets.AWS_REGION }}
 
-      - name: Update ECS Service with new Load Balancer and Target Group
+      - name: Fetch Subnet IDs and Security Groups
+        id: fetch-subnets-sgs
+        run: |
+          # Fetch Subnet IDs and Security Group IDs from the provided VPC
+          SUBNET_IDS=$(aws ec2 describe-subnets --filters Name=vpc-id,Values=${{ secrets.VPC_ID }} --query 'Subnets[*].SubnetId' --output text --region ${{ secrets.AWS_REGION }})
+          SECURITY_GROUPS=$(aws ec2 describe-security-groups --filters Name=vpc-id,Values=${{ secrets.VPC_ID }} --query 'SecurityGroups[*].GroupId' --output text --region ${{ secrets.AWS_REGION }})
+
+          # Set outputs for use in next steps
+          echo "::set-output name=subnet_ids::$SUBNET_IDS"
+          echo "::set-output name=security_groups::$SECURITY_GROUPS"
+
+      - name: Create new ECS Service
         env:
           CLUSTER_NAME: ${{ secrets.CLUSTER_NAME }}
           SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
+          TG_ARN: arn:aws:elasticloadbalancing:us-east-2:011528270926:targetgroup/v-tg1/1e0c9e7ad875dbe4 # Provided Target Group ARN
+          NEW_ALB_NAME: ${{ secrets.NEW_ALB_NAME }}  # ALB Name here
+          SUBNET_IDS: ${{ steps.fetch-subnets-sgs.outputs.subnet_ids }}
+          SECURITY_GROUPS: ${{ steps.fetch-subnets-sgs.outputs.security_groups }}
           CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
           CONTAINER_PORT: ${{ secrets.CONTAINER_PORT }}
-          NEW_TG_ARN: ${{ secrets.NEW_TG_ARN }}
-          NEW_ALB_NAME: ${{ secrets.NEW_ALB_NAME }}  # ALB Name here
         run: |
-          echo "Updating ECS service with new ALB and TG..."
-          if [ -n "$NEW_TG_ARN" ] && [ -n "$NEW_ALB_NAME" ]; then
-            aws ecs update-service \
-              --cluster "$CLUSTER_NAME" \
-              --service "$SERVICE_NAME" \
-              --force-new-deployment \
-              --load-balancers "targetGroupArn=$NEW_TG_ARN,containerName=$CONTAINER_NAME,containerPort=$CONTAINER_PORT" \
-              --region ${{ secrets.AWS_REGION }}
-          else
-            echo "Error: Target Group ARN and ALB Name are required."
-            exit 1
-          fi
+          echo "Creating new ECS service with Task Definition, Target Group, and ALB..."
+          
+          aws ecs create-service \
+            --cluster "$CLUSTER_NAME" \
+            --service-name "$SERVICE_NAME" \
+            --task-definition ${{ secrets.SERVICE_NAME }}-family \
+            --desired-count 1 \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_IDS],securityGroups=[$SECURITY_GROUPS],assignPublicIp=ENABLED}" \
+            --load-balancers "targetGroupArn=$TG_ARN,containerName=$CONTAINER_NAME,containerPort=$CONTAINER_PORT,loadBalancerName=$NEW_ALB_NAME" \
+            --region ${{ secrets.AWS_REGION }}
