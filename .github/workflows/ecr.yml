@@ -71,17 +71,16 @@ jobs:
           SECURITY_GROUPS: ${{ secrets.SECURITY_GROUPS }}
           CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
           CONTAINER_PORT: ${{ secrets.CONTAINER_PORT }}
-          TG_ARN: arn:aws:elasticloadbalancing:us-east-2:011528270926:targetgroup/v-tg1/1e0c9e7ad875dbe4 # Provided Target Group ARN
-          NEW_ALB_NAME: ${{ secrets.NEW_ALB_NAME }}  # ALB Name here
+          TG_ARN: arn:aws:elasticloadbalancing:us-east-2:011528270926:targetgroup/v-tg1/1e0c9e7ad875dbe4 # Replace with your actual Target Group ARN
         run: |
-          echo "Creating new ECS service with Task Definition, Target Group, and ALB..."
-          
+          echo "Creating new ECS service with Task Definition and Target Group..."
+
           aws ecs create-service \
             --cluster "$CLUSTER_NAME" \
             --service-name "$SERVICE_NAME" \
-            --task-definition ${{ secrets.SERVICE_NAME }}-family \
+            --task-definition "${SERVICE_NAME}-family" \
             --desired-count 1 \
             --launch-type FARGATE \
             --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_IDS],securityGroups=[$SECURITY_GROUPS],assignPublicIp=ENABLED}" \
-            --load-balancers "targetGroupArn=$TG_ARN,containerName=$CONTAINER_NAME,containerPort=$CONTAINER_PORT,loadBalancerName=$NEW_ALB_NAME" \
+            --load-balancers "targetGroupArn=$TG_ARN,containerName=$CONTAINER_NAME,containerPort=$CONTAINER_PORT" \
             --region ${{ secrets.AWS_REGION }}
