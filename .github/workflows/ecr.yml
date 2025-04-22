@@ -1,17 +1,21 @@
-name: Build, Push, and Deploy to ECS
+name: Build and Deploy to ECS
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REPO: v/crud-repo
+  ECS_CLUSTER: v-cluster
+  ECS_SERVICE: v-crud-2
+  CONTAINER_NAME: V-C
+  EXECUTION_ROLE: arn:aws:iam::011528270926:role/v-task-exec-role
+  TASK_ROLE: arn:aws:iam::011528270926:role/V-T-D-ECS
 
 jobs:
-  build-push-deploy:
+  deploy:
     runs-on: ubuntu-latest
-
-    env:
-      ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
-      IMAGE_TAG: latest
 
     steps:
       - name: Checkout code
@@ -22,92 +26,49 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build and Push Docker Image
+      - name: Build and push Docker image
         run: |
-          docker build -t $ECR_REGISTRY/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG
+          IMAGE_URI="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}:latest"
+          docker build -t $IMAGE_URI .
+          docker push $IMAGE_URI
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
-      - name: Register new Task Definition
-        id: register-task-def
+      - name: Fetch current task definition
         run: |
-          echo '{
-            "family": "${{ secrets.SERVICE_NAME }}-family",
-            "networkMode": "awsvpc",
-            "executionRoleArn": "${{ secrets.TASK_EXECUTION_ROLE_ARN }}",
-            "taskRoleArn": "${{ secrets.TASK_ROLE_ARN }}",
-            "requiresCompatibilities": ["FARGATE"],
-            "cpu": "256",
-            "memory": "512",
-            "containerDefinitions": [
-              {
-                "name": "${{ secrets.CONTAINER_NAME }}",
-                "image": "'$ECR_REGISTRY'/${{ secrets.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}",
-                "portMappings": [
-                  {
-                    "containerPort": ${{ secrets.CONTAINER_PORT }},
-                    "protocol": "tcp"
-                  }
-                ],
-                "essential": true,
-                "logConfiguration": {
-                  "logDriver": "awslogs",
-                  "options": {
-                    "awslogs-group": "/ecs/${{ secrets.SERVICE_NAME }}",
-                    "awslogs-region": "${{ secrets.AWS_REGION }}",
-                    "awslogs-stream-prefix": "ecs"
-                  }
-                }
-              }
-            ],
-            "runtimePlatform": {
-              "operatingSystemFamily": "LINUX",
-              "cpuArchitecture": "X86_64"
-            }
-          }' > taskdef.json
+          aws ecs describe-task-definition \
+            --task-definition $ECS_SERVICE \
+            --query "taskDefinition" \
+            > current-task-def.json
+
+      - name: Register new task definition revision
+        run: |
+          NEW_TASK_DEF=$(jq \
+            --arg IMAGE "$IMAGE_URI" \
+            --arg EXEC_ROLE "$EXECUTION_ROLE" \
+            --arg TASK_ROLE "$TASK_ROLE" \
+            '.containerDefinitions[0].image = $IMAGE |
+             .executionRoleArn = $EXEC_ROLE |
+             .taskRoleArn = $TASK_ROLE |
+             {family, executionRoleArn, taskRoleArn, networkMode, containerDefinitions, requiresCompatibilities, cpu, memory}' \
+            current-task-def.json)
+
+          echo "$NEW_TASK_DEF" > new-task-def.json
 
           TASK_DEF_ARN=$(aws ecs register-task-definition \
-            --cli-input-json file://taskdef.json \
-            --query 'taskDefinition.taskDefinitionArn' \
+            --cli-input-json file://new-task-def.json \
+            --query "taskDefinition.taskDefinitionArn" \
             --output text)
 
           echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_ENV
 
-      - name: Deploy or Update ECS Service
-        env:
-          CLUSTER_NAME: ${{ secrets.CLUSTER_NAME }}
-          SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
-          SUBNET_IDS: ${{ secrets.SUBNET_IDS }}
-          SECURITY_GROUPS: ${{ secrets.SECURITY_GROUPS }}
-          CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
-          CONTAINER_PORT: ${{ secrets.CONTAINER_PORT }}
-          TG_ARN: arn:aws:elasticloadbalancing:us-east-2:011528270926:targetgroup/v-tg1/1e0c9e7ad875dbe4
-          TASK_DEF_ARN: ${{ env.TASK_DEF_ARN }}
+      - name: Update ECS service with new task definition
         run: |
-          echo "Deploying ECS Service..."
-
-          # Check if service exists
-          SERVICE_EXISTS=$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$SERVICE_NAME" --query "services[0].status" --output text 2>/dev/null || echo "MISSING")
-
-          if [ "$SERVICE_EXISTS" == "ACTIVE" ]; then
-            echo "Service exists, updating..."
-            aws ecs update-service \
-              --cluster "$CLUSTER_NAME" \
-              --service "$SERVICE_NAME" \
-              --task-definition "$TASK_DEF_ARN" \
-              --desired-count 1
-          else
-            echo "Service does not exist, creating..."
-            aws ecs create-service \
-              --cluster "$CLUSTER_NAME" \
-              --service-name "$SERVICE_NAME" \
-              --task-definition "$TASK_DEF_ARN" \
-              --desired-count 1 \
-              --launch-type FARGATE \
-              --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_IDS],securityGroups=[$SECURITY_GROUPS],assignPublicIp=ENABLED}" \
-              --load-balancers "targetGroupArn=$TG_ARN,containerName=$CONTAINER_NAME,containerPort=$CONTAINER_PORT}"
-          fi
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_SERVICE \
+            --task-definition ${{ env.TASK_DEF_ARN }}
