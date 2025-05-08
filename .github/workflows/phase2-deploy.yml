@@ -5,7 +5,7 @@ on:
     branches: [ main ]
 
 env:
-  AWS_REGION: us-east-2
+  AWS_REGION: us-east-1
   ECR_REPO_URL: <YOUR_ECR_REPO_URL_HERE>  # Replace this with your ECR repo URL
   IMAGE_TAG: ${{ github.sha }}
 
