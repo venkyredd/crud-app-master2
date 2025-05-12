@@ -45,25 +45,19 @@ jobs:
         run: terraform apply -auto-approve
 
       - name: Get ECR Repository URL from Terraform Output
-        id: get_ecr_url
+        id: get_ecr
         working-directory: environments/dev/phase1
         run: |
-          RAW_OUTPUT=$(terraform output -raw ecr_repository_url | tail -n 1)
-          echo "ECR_URL=$RAW_OUTPUT" >> $GITHUB_ENV
-          echo "ecr_url=$RAW_OUTPUT" >> $GITHUB_OUTPUT
+          echo "ECR_REPO_URL=$(terraform output -raw ecr_repository_url)" >> $GITHUB_ENV
+          echo "ecr_repo_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
 
-      - name: Login to ECR
-        run: |
-          # Extract ECR URL domain and repository URL
-          ECR_URL=$(echo "$ECR_URL" | sed 's|https://||')  # Remove 'https://' if present
-          aws ecr get-login-password --region $AWS_REGION | \
-          docker login --username AWS --password-stdin $ECR_URL
-
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v1
 
       - name: Build and Push Docker Image
         run: |
           IMAGE_TAG=$(date +%s)
-          IMAGE_URI="$ECR_URL:$IMAGE_TAG"
+          IMAGE_URI="${{ steps.get_ecr.outputs.ecr_repo_url }}:$IMAGE_TAG"
           echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
           docker build -t $IMAGE_URI .
           docker push $IMAGE_URI
