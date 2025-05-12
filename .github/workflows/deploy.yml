@@ -44,15 +44,17 @@ jobs:
       - name: Apply Terraform (Infra - Phase 1)
         working-directory: environments/dev/phase1
         run: terraform apply -auto-approve
-
+        
       - name: Get ECR Repository URL from Terraform Output
         id: get_ecr
         working-directory: environments/dev/phase1
         run: |
-          echo "Extracting ECR URL from Terraform output..."
-          RAW_OUTPUT=$(terraform output -raw ecr_repository_url)
-          echo "ECR_REPO_URL=${RAW_OUTPUT}" >> "$GITHUB_ENV"
-          echo "ecr_repo_url=${RAW_OUTPUT}" >> "$GITHUB_OUTPUT"
+         echo "Extracting ECR URL from Terraform output..."
+         RAW_OUTPUT=$(terraform output -raw ecr_repository_url)
+         # Ensure no extra spaces or characters are included in the URL
+         CLEANED_OUTPUT=$(echo $RAW_OUTPUT | sed 's/\r//g') # Removing any carriage return characters if present
+         echo "ECR_REPO_URL=${CLEANED_OUTPUT}" >> "$GITHUB_ENV"
+         echo "ecr_repo_url=${CLEANED_OUTPUT}" >> "$GITHUB_OUTPUT"
 
 
       - name: Login to ECR
