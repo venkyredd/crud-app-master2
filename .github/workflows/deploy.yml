@@ -48,17 +48,23 @@ jobs:
         id: get_ecr
         working-directory: environments/dev/phase1
         run: |
-          echo "ECR_REPO_URL=$(terraform output -raw ecr_repository_url)" >> $GITHUB_ENV
-          echo "ecr_repo_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
+          ECR_REPO_URL=$(terraform output -raw ecr_repository_url)
+          echo "ECR_REPO_URL=$ECR_REPO_URL" >> $GITHUB_ENV
+          echo "ecr_repo_url=$ECR_REPO_URL" >> $GITHUB_OUTPUT
 
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v1
+      - name: Login to ECR
+        run: |
+          ECR_DOMAIN=$(echo "${{ steps.get_ecr.outputs.ecr_repo_url }}" | cut -d'/' -f1)
+          aws ecr get-login-password --region $AWS_REGION | \
+          docker login --username AWS --password-stdin $ECR_DOMAIN
 
       - name: Build and Push Docker Image
+        id: build_image
         run: |
           IMAGE_TAG=$(date +%s)
           IMAGE_URI="${{ steps.get_ecr.outputs.ecr_repo_url }}:$IMAGE_TAG"
           echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+          echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
           docker build -t $IMAGE_URI .
           docker push $IMAGE_URI
 
@@ -72,7 +78,7 @@ jobs:
 
       - name: Plan ECS Service Update
         working-directory: environments/dev/phase2
-        run: terraform plan -out=tfplan -var="image_url=${{ env.IMAGE_URI }}"
+        run: terraform plan -out=tfplan -var="image_url=${{ steps.build_image.outputs.image_uri }}"
 
       - name: Apply ECS Service Update
         working-directory: environments/dev/phase2
