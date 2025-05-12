@@ -48,18 +48,19 @@ jobs:
         id: get_ecr_url
         working-directory: environments/dev/phase1
         run: |
-          ECR_URL=$(terraform output -raw ecr_repository_url)
-          echo "ECR_URL=$ECR_URL" >> $GITHUB_ENV
+          RAW_OUTPUT=$(terraform output -raw ecr_repository_url | tail -n 1)
+          echo "ECR_URL=$RAW_OUTPUT" >> $GITHUB_ENV
+          echo "ecr_url=$RAW_OUTPUT" >> $GITHUB_OUTPUT
 
       - name: Login to ECR
         run: |
           aws ecr get-login-password --region $AWS_REGION | \
-          docker login --username AWS --password-stdin ${{ env.ECR_URL }}
+          docker login --username AWS --password-stdin $ECR_URL
 
       - name: Build and Push Docker Image
         run: |
           IMAGE_TAG=$(date +%s)
-          IMAGE_URI="${{ env.ECR_URL }}:$IMAGE_TAG"
+          IMAGE_URI="$ECR_URL:$IMAGE_TAG"
           echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
           docker build -t $IMAGE_URI .
           docker push $IMAGE_URI
