@@ -1,18 +1,25 @@
-module "ecs_service" {
-  source = "./modules/ecs-service"
+data "terraform_remote_state" "phase1" {
+  backend = "s3"
+  config = {
+    bucket = "your-tf-state-bucket"
+    key    = "infra/terraform.tfstate"
+    region = "your-region"
+  }
+}
 
-  task_family        = var.task_family
-  execution_role_arn = var.execution_role_arn
-  cpu                = var.cpu
-  memory             = var.memory
-  container_name     = var.container_name
-  container_port     = var.container_port
-  ecr_repo_url       = module.ecs.repository_url
-  image_tag          = var.image_tag
-  ecs_cluster_id     = module.ecs.cluster_id
-  private_subnets    = module.network.public_subnet_ids
-  shared_sg_id       = module.security_group.shared_sg_id
-  target_group_arn   = module.alb.target_group_arn
-  service_name       = var.service_name
-  desired_count      = var.desired_count
+module "ecs_service" {
+  source              = "../../../modules/ecs-service"
+  task_family         = var.task_family
+  execution_role_arn  = data.terraform_remote_state.phase1.outputs.ecs_task_execution_role_arn
+  cpu                 = var.cpu
+  memory              = var.memory
+  container_name      = var.container_name
+  container_port      = var.container_port
+  image_url           = var.image_url  # Injected by GitHub Actions
+  ecs_cluster_id      = data.terraform_remote_state.phase1.outputs.ecs_cluster_id
+  private_subnets     = data.terraform_remote_state.phase1.outputs.public_subnet_ids
+  shared_sg_id        = data.terraform_remote_state.phase1.outputs.shared_sg_id
+  target_group_arn    = data.terraform_remote_state.phase1.outputs.alb_target_group_arn
+  service_name        = var.service_name
+  desired_count       = var.desired_count
 }
