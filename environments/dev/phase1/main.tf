@@ -21,6 +21,5 @@ module "ecs" {
   source           = "../../../modules/ecs"
   cluster_name     = var.cluster_name
   repository_name  = var.repository_name
-  execution_role_arn  = var.execution_role_arn  
 }
 
