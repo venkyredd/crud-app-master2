@@ -47,10 +47,11 @@ jobs:
         working-directory: environments/dev/phase1
         run: |
           echo "Extracting ECR URL from Terraform output..."
-          RAW_OUTPUT=$(terraform output -raw ecr_repository_url)
-          CLEANED_OUTPUT=$(echo "$RAW_OUTPUT" | sed 's/\r//g')
-          echo "ECR_REPO_URL=${CLEANED_OUTPUT}" >> "$GITHUB_ENV"
-          echo "ecr_repo_url=${CLEANED_OUTPUT}" >> "$GITHUB_OUTPUT"
+          # Capture only the real ECR URL, discard any noise
+          RAW=$(terraform output ecr_repository_url 2>&1)
+          ECR_URL=$(echo "$RAW" | grep -Eo '([A-Za-z0-9\-]+\.dkr\.ecr\.[a-z0-9\-]+\.amazonaws\.com\/[A-Za-z0-9._\/-]+)' | head -n1)
+          echo "ECR_REPO_URL=${ECR_URL}" >> "$GITHUB_ENV"
+          echo "ecr_repo_url=${ECR_URL}" >> "$GITHUB_OUTPUT"
 
       - name: Login to ECR
         run: |
