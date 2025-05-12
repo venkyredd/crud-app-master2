@@ -54,10 +54,11 @@ jobs:
 
       - name: Login to ECR
         run: |
-          # Extract ECR URL domain
-          ECR_HOST=$(echo "$ECR_URL" | cut -d'/' -f1)  # Extract registry domain
+          # Extract ECR URL domain and repository URL
+          ECR_URL=$(echo "$ECR_URL" | sed 's|https://||')  # Remove 'https://' if present
           aws ecr get-login-password --region $AWS_REGION | \
-          docker login --username AWS --password-stdin $ECR_HOST
+          docker login --username AWS --password-stdin $ECR_URL
+
 
       - name: Build and Push Docker Image
         run: |
