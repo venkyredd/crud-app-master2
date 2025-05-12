@@ -1,4 +1,3 @@
-
 variable "cluster_name" {
   description = "The name of the ECS cluster"
   type        = string
@@ -11,58 +10,75 @@ variable "repository_name" {
   default     = "my-ecr-repo"
 }
 
-variable "ecs_task_execution_role_name" {
-  description = "The name of the ECS task execution role"
+variable "execution_role_arn" {
+  description = "IAM role ARN used by ECS for pulling images and sending logs"
   type        = string
-  default     = "ecs-task-execution-role"
 }
 
 variable "task_family" {
-  type        = string
   description = "ECS Task Definition family name"
+  type        = string
   default     = "my-task-family"
 }
 
-variable "execution_role_arn" {
-  type        = string
-  description = "IAM role ARN used by ECS for pulling images and sending logs"
-}
-
 variable "cpu" {
+  description = "Task CPU units"
   type        = string
   default     = "256"
 }
 
 variable "memory" {
+  description = "Task memory (MiB)"
   type        = string
   default     = "512"
 }
 
 variable "container_name" {
-  type        = string
   description = "Container name used inside task definition"
+  type        = string
   default     = "my-app"
 }
 
 variable "container_port" {
-  type        = number
   description = "Port the container listens on"
+  type        = number
   default     = 80
 }
 
 variable "image_tag" {
+  description = "Docker image tag to deploy"
   type        = string
-  description = "Docker image tag"
   default     = "latest"
 }
 
-variable "service_name" {
+variable "image_url" {
+  description = "Full ECR image URI (including tag)"
   type        = string
+}
+
+variable "service_name" {
   description = "ECS service name"
+  type        = string
   default     = "my-service"
 }
 
 variable "desired_count" {
+  description = "Number of tasks to run"
   type        = number
   default     = 1
+}
+
+variable "subnets" {
+  description = "VPC subnet IDs for the ECS service"
+  type        = list(string)
+}
+
+variable "security_groups" {
+  description = "Security group IDs for the ECS service"
+  type        = list(string)
+}
+
+variable "target_group_arn" {
+  description = "ALB target group ARN to attach the service to"
+  type        = string
 }
