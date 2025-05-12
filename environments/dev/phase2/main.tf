@@ -1,9 +1,9 @@
 data "terraform_remote_state" "phase1" {
   backend = "s3"
   config = {
-    bucket = "your-tf-state-bucket"
+    bucket = "v-infra-backend"
     key    = "infra/terraform.tfstate"
-    region = "your-region"
+    region = "us-east-2"
   }
 }
 
