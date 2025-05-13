@@ -17,7 +17,7 @@ module "ecs_service" {
   container_port      = var.container_port
   image_url           = var.image_url  # Injected by GitHub Actions
   ecs_cluster_id      = data.terraform_remote_state.phase1.outputs.ecs_cluster_id
-  private_subnets     = data.terraform_remote_state.phase1.outputs.public_subnet_ids
+  public_subnets     = data.terraform_remote_state.phase1.outputs.public_subnet_ids
   shared_sg_id        = data.terraform_remote_state.phase1.outputs.shared_sg_id
   target_group_arn    = data.terraform_remote_state.phase1.outputs.alb_target_group_arn
   service_name        = var.service_name
