@@ -40,7 +40,7 @@ variable "ecs_cluster_id" {
 
 variable "public_subnets" {
   type        = list(string)
-  description = "List of private subnet IDs for the ECS service"
+  description = "List of public subnet IDs for the ECS service"
 }
 
 variable "shared_sg_id" {
